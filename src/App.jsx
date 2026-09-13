@@ -123,7 +123,7 @@ export default function App() {
     return SPEAKER_COLORS[Math.abs(idx) % SPEAKER_COLORS.length];
   };
 
-  const startLive = async () => {
+    const startLive = async () => {
     setError('');
     setTranscript([]);
     setNotes(null);
@@ -138,11 +138,18 @@ export default function App() {
       source.connect(proc);
       proc.connect(ctx.destination);
 
+      const TARGET_RATE = 16000;
+      const step = Math.max(1, Math.round(ctx.sampleRate / TARGET_RATE));
+
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
       ws.onopen = () => ws.send(JSON.stringify({ type: 'config', language: 'en-US' }));
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
+        if (msg.type === 'error') {
+          setError('Live error: ' + msg.message);
+          return;
+        }
         if (msg.type !== 'transcript' || !msg.text.trim()) return;
         setTranscript((t) => {
           const last = t[t.length - 1];
@@ -152,12 +159,19 @@ export default function App() {
           return [...t, { speaker: msg.speaker, text: msg.text, final: msg.is_final, ts: Date.now() + Math.random() }];
         });
       };
-      ws.onerror = () => setError('WebSocket error — is the server running on port 3001?');
+      ws.onerror = () => setError('WebSocket error — is the server running?');
       ws.onclose = () => setTranscript((t) => t.map((x) => ({ ...x, final: true })));
 
       proc.onaudioprocess = (e) => {
         if (ws.readyState !== WebSocket.OPEN) return;
-        ws.send(encodePCM(e.inputBuffer.getChannelData(0)));
+        const input = e.inputBuffer.getChannelData(0);
+        if (step > 1) {
+          const out = new Float32Array(Math.ceil(input.length / step));
+          for (let i = 0, j = 0; i < input.length; i += step, j++) out[j] = input[i];
+          ws.send(encodePCM(out));
+        } else {
+          ws.send(encodePCM(input));
+        }
       };
 
       setMeetingOn(true);
