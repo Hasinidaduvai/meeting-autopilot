@@ -62,6 +62,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [demoFile, setDemoFile] = useState(null);
+  const [liveStatus, setLiveStatus] = useState('');
   const [copied, setCopied] = useState(false);
   const [pasteText, setPasteText] = useState('[Speaker 1] Thanks for joining everyone.\n[Speaker 2] Let us review the budget deck.\n[Speaker 1] Priya, can you send the deck by Friday.\n[Speaker 2] Yes, I will share it.\n[Speaker 1] Rahul, please get the vendor pricing.\n[Speaker 2] I can ask the vendor today.');
 
@@ -123,7 +124,7 @@ export default function App() {
     return SPEAKER_COLORS[Math.abs(idx) % SPEAKER_COLORS.length];
   };
 
-    const startLive = async () => {
+  const startLive = async () => {
     setError('');
     setTranscript([]);
     setNotes(null);
@@ -143,11 +144,20 @@ export default function App() {
 
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
-      ws.onopen = () => ws.send(JSON.stringify({ type: 'config', language: 'en-US' }));
+      setLiveStatus('Connecting to server...');
+      ws.onopen = () => {
+        setLiveStatus('Connecting to Deepgram AI...');
+        ws.send(JSON.stringify({ type: 'config', language: 'en-US' }));
+      };
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
+        if (msg.type === 'ready') {
+          setLiveStatus('Connected — speak now');
+          return;
+        }
         if (msg.type === 'error') {
           setError('Live error: ' + msg.message);
+          setLiveStatus('Error — see red box');
           return;
         }
         if (msg.type !== 'transcript' || !msg.text.trim()) return;
@@ -160,7 +170,7 @@ export default function App() {
         });
       };
       ws.onerror = () => setError('WebSocket error — is the server running?');
-      ws.onclose = () => setTranscript((t) => t.map((x) => ({ ...x, final: true })));
+      ws.onclose = () => setLiveStatus('Disconnected');
 
       proc.onaudioprocess = (e) => {
         if (ws.readyState !== WebSocket.OPEN) return;
@@ -190,11 +200,12 @@ export default function App() {
     if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
     wsRef.current = null;
     setMeetingOn(false);
+    setLiveStatus('');
   };
 
   const makeNotes = async () => {
     if (transcript.length === 0) {
-      setError('No transcript yet — start a meeting first');
+      setError('No transcript yet — start a meeting and speak first');
       return;
     }
     setLoading(true);
@@ -417,7 +428,7 @@ export default function App() {
                     {loading ? 'Thinking...' : 'Generate Notes'}
                   </button>
                 </div>
-                <div style={styles.liveBadge}>{meetingOn ? 'LIVE — mic streaming, speaker-aware' : 'Speak now, get notes after. Works on a normal laptop mic.'}</div>
+                <div style={styles.liveBadge}>{meetingOn ? 'LIVE — ' + (liveStatus || 'speaking...') : 'Speak now, get notes after. Works on a normal laptop mic.'}</div>
               </div>
             )}
 
@@ -513,7 +524,7 @@ const styles = {
   btnGreen: { padding: '16px 34px', borderRadius: 999, border: 'none', background: 'linear-gradient(120deg, #10b981, #0ea5e9)', color: '#04120c', fontSize: 17, fontWeight: 800, cursor: 'pointer', boxShadow: '0 8px 30px rgba(16,185,129,0.35)' },
   btnRed: { padding: '13px 22px', borderRadius: 10, border: 'none', background: '#ef4444', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' },
   btnBack: { padding: '12px 24px', borderRadius: 999, border: '1px solid #2a3a4d', background: 'transparent', color: '#9aa7b8', fontSize: 14, fontWeight: 600, cursor: 'pointer' },
-  liveBadge: { fontSize: 13, color: '#8b98a9' },
+  liveBadge: { fontSize: 13, color: '#8b98a9', minHeight: 18 },
 
   panelLabel: { fontFamily: 'monospace', fontSize: 12, letterSpacing: '0.15em', color: '#60a5fa', textTransform: 'uppercase', margin: '18px 0 10px' },
   transcriptWrap: { maxHeight: 200, overflow: 'auto', border: '1px solid #1c2836', borderRadius: 12, padding: 16, background: 'rgba(10,15,22,0.8)' },

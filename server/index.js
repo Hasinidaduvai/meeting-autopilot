@@ -5,6 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const WebSocket = require('ws');
+const WebSocketClient = require('ws');
 const { createClient } = require('@deepgram/sdk');
 const { generateNotes } = require('./groq');
 
@@ -25,8 +26,8 @@ wss.on('connection', (socket) => {
 
   socket.on('message', (raw) => {
     if (typeof raw !== 'string') {
-      if (dg) {
-        try { dg.send(raw); } catch (e) {}
+      if (dg && dg.readyState === 1) {
+        dg.send(raw);
       }
       return;
     }
@@ -34,21 +35,34 @@ wss.on('connection', (socket) => {
 
     if (msg.type === 'config') {
       try {
-        dg = deepgram.listen.live({
-          language: msg.language || 'en-US',
+        const query = new URLSearchParams({
           model: 'nova-3',
-          punctuate: true,
-          interim_results: true,
-          diarize: true,
+          language: msg.language || 'en-US',
+          punctuate: 'true',
+          interim_results: 'true',
+          diarize: 'true',
         });
-        dg.on('transcript', (data) => {
-          const alt = data.channel && data.channel.alternatives && data.channel.alternatives[0];
+        dg = new WebSocketClient('wss://api.deepgram.com/v1/listen?' + query.toString(), 'token', {
+          headers: { Authorization: 'Token ' + process.env.DEEPGRAM_API_KEY },
+        });
+        dg.on('open', () => socket.send(JSON.stringify({ type: 'ready' })));
+        dg.on('message', (data) => {
+          let evt;
+          try { evt = JSON.parse(data.toString()); } catch (e) { return; }
+          if (evt.type !== 'Results') return;
+          const alt = evt.channel && evt.channel.alternatives && evt.channel.alternatives[0];
           if (!alt || !alt.transcript) return;
-          const speaker = alt.words && alt.words[0] ? alt.words[0].speaker : 0;
-          socket.send(JSON.stringify({ type: 'transcript', is_final: data.is_final, speaker, text: alt.transcript }));
+          const words = alt.words || [];
+          const speaker = words[0] && typeof words[0].speaker === 'number' ? words[0].speaker : 0;
+          socket.send(JSON.stringify({ type: 'transcript', is_final: !!evt.is_final, speaker, text: alt.transcript }));
         });
-        dg.on('error', (err) => socket.send(JSON.stringify({ type: 'error', message: err.message })));
-        dg.on('close', () => socket.send(JSON.stringify({ type: 'close' })));
+        dg.on('error', (err) => {
+          console.error('Deepgram error:', err && (err.message || err));
+          if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'error', message: (err && err.message) || 'Deepgram connection error' }));
+        });
+        dg.on('close', () => {
+          if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'close' }));
+        });
       } catch (e) {
         socket.send(JSON.stringify({ type: 'error', message: e.message }));
       }
@@ -56,13 +70,13 @@ wss.on('connection', (socket) => {
     }
 
     if (msg.type === 'end' && dg) {
-      dg.finish();
+      dg.close();
       dg = null;
     }
   });
 
   socket.on('close', () => {
-    if (dg) dg.finish();
+    if (dg) dg.close();
   });
 });
 
