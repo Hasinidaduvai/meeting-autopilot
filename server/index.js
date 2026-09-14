@@ -23,6 +23,7 @@ const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
 wss.on('connection', (socket) => {
   let dg = null;
+  console.log('WS client connected');
 
   socket.on('message', (raw) => {
     if (typeof raw !== 'string') {
@@ -34,6 +35,7 @@ wss.on('connection', (socket) => {
     const msg = JSON.parse(raw);
 
     if (msg.type === 'config') {
+      console.log('Config received, creating Deepgram connection...');
       try {
         const query = new URLSearchParams({
           model: 'nova-3',
@@ -45,7 +47,16 @@ wss.on('connection', (socket) => {
         dg = new WebSocketClient('wss://api.deepgram.com/v1/listen?' + query.toString(), 'token', {
           headers: { Authorization: 'Token ' + process.env.DEEPGRAM_API_KEY },
         });
-        dg.on('open', () => socket.send(JSON.stringify({ type: 'ready' })));
+        dg.on('open', () => {
+          console.log('Deepgram connection OPEN');
+          socket.send(JSON.stringify({ type: 'ready' }));
+        });
+        setTimeout(() => {
+          if (dg && dg.readyState !== 1) {
+            console.log('WATCHDOG: Deepgram state after 10s =', dg.readyState, '(1=open). No response.');
+            if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'error', message: 'Deepgram connection timed out (state ' + dg.readyState + ')' }));
+          }
+        }, 10000);
         dg.on('message', (data) => {
           let evt;
           try { evt = JSON.parse(data.toString()); } catch (e) { return; }
@@ -61,9 +72,11 @@ wss.on('connection', (socket) => {
           if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'error', message: (err && err.message) || 'Deepgram connection error' }));
         });
         dg.on('close', () => {
+          console.log('Deepgram connection CLOSED');
           if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'close' }));
         });
       } catch (e) {
+        console.error('Config handler threw:', e.message);
         socket.send(JSON.stringify({ type: 'error', message: e.message }));
       }
       return;
