@@ -25,14 +25,14 @@ wss.on('connection', (socket) => {
   let dg = null;
   console.log('WS client connected');
 
-  socket.on('message', (raw) => {
-    if (typeof raw !== 'string') {
+  socket.on('message', (raw, isBinary) => {
+    if (isBinary) {
       if (dg && dg.readyState === 1) {
         dg.send(raw);
       }
       return;
     }
-    const msg = JSON.parse(raw);
+    const msg = JSON.parse(raw.toString());
 
     if (msg.type === 'config') {
       console.log('Config received, creating Deepgram connection...');
