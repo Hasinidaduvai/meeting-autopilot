@@ -71,9 +71,10 @@ wss.on('connection', (socket) => {
           console.error('Deepgram error:', err && (err.message || err));
           if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'error', message: (err && err.message) || 'Deepgram connection error' }));
         });
-        dg.on('close', () => {
-          console.log('Deepgram connection CLOSED');
-          if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'close' }));
+        dg.on('close', (code, reason) => {
+          const detail = (reason && reason.toString()) || 'no reason given';
+          console.log('Deepgram connection CLOSED. code=' + code + ' reason=' + detail);
+          if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'error', message: 'Deepgram closed the stream (code ' + code + '): ' + detail }));
         });
       } catch (e) {
         console.error('Config handler threw:', e.message);
